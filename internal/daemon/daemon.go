@@ -131,6 +131,11 @@ func New(projectRoot string, cfg *config.Config, logger *slog.Logger) (*Daemon, 
 			APIKey: cfg.Embedding.GetVoyageAPIKey(),
 			Model:  cfg.Embedding.Voyage.Model,
 		},
+		VertexAI: embedder.VertexAIProviderSettings{
+			ProjectID: cfg.Embedding.GetVertexAIProjectID(),
+			Location:  cfg.Embedding.GetVertexAILocation(),
+			Model:     cfg.Embedding.GetVertexAIModel(),
+		},
 	}
 
 	// Default to Ollama for backward compatibility

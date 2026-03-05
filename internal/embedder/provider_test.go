@@ -18,6 +18,7 @@ func TestProviderType_String(t *testing.T) {
 		{ProviderOllamaRemote, "ollama-remote"},
 		{ProviderOpenAI, "openai"},
 		{ProviderVoyage, "voyage"},
+		{ProviderVertexAI, "vertexai"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
@@ -32,6 +33,7 @@ func TestProviderType_IsValid(t *testing.T) {
 		assert.True(t, ProviderOllamaRemote.IsValid())
 		assert.True(t, ProviderOpenAI.IsValid())
 		assert.True(t, ProviderVoyage.IsValid())
+		assert.True(t, ProviderVertexAI.IsValid())
 	})
 
 	t.Run("invalid provider", func(t *testing.T) {
@@ -52,6 +54,7 @@ func TestProviderType_DisplayName(t *testing.T) {
 		{ProviderOllamaRemote, "Ollama (remote)"},
 		{ProviderOpenAI, "OpenAI"},
 		{ProviderVoyage, "Voyage AI"},
+		{ProviderVertexAI, "Google Vertex AI"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.provider), func(t *testing.T) {
@@ -74,6 +77,10 @@ func TestProviderType_RequiresAPIKey(t *testing.T) {
 		assert.True(t, ProviderOpenAI.RequiresAPIKey())
 		assert.True(t, ProviderVoyage.RequiresAPIKey())
 	})
+
+	t.Run("vertexai does not require API key (uses ADC)", func(t *testing.T) {
+		assert.False(t, ProviderVertexAI.RequiresAPIKey())
+	})
 }
 
 func TestProviderType_DefaultDimensions(t *testing.T) {
@@ -85,6 +92,7 @@ func TestProviderType_DefaultDimensions(t *testing.T) {
 		{ProviderOllamaRemote, 768}, // Jina Code
 		{ProviderOpenAI, 1536},      // text-embedding-3-small
 		{ProviderVoyage, 1024},      // voyage-code-3
+		{ProviderVertexAI, 768},     // text-embedding-004
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.provider), func(t *testing.T) {
@@ -95,11 +103,12 @@ func TestProviderType_DefaultDimensions(t *testing.T) {
 
 func TestAllProviders(t *testing.T) {
 	providers := AllProviders()
-	assert.Len(t, providers, 4)
+	assert.Len(t, providers, 5)
 	assert.Contains(t, providers, ProviderOllama)
 	assert.Contains(t, providers, ProviderOllamaRemote)
 	assert.Contains(t, providers, ProviderOpenAI)
 	assert.Contains(t, providers, ProviderVoyage)
+	assert.Contains(t, providers, ProviderVertexAI)
 }
 
 func TestAPIProviders(t *testing.T) {
@@ -243,6 +252,10 @@ func TestProviderType_MaxContextTokens_Voyage(t *testing.T) {
 	assert.Equal(t, 15000, ProviderVoyage.MaxContextTokens())
 }
 
+func TestProviderType_MaxContextTokens_VertexAI(t *testing.T) {
+	assert.Equal(t, 3000, ProviderVertexAI.MaxContextTokens())
+}
+
 // --- Edge Case Tests ---
 
 func TestProviderType_MaxContextTokens_UnknownProvider(t *testing.T) {
@@ -264,6 +277,7 @@ func TestProviderType_MaxContextTokens_AllProvidersHaveLimits(t *testing.T) {
 		ProviderOllamaRemote,
 		ProviderOpenAI,
 		ProviderVoyage,
+		ProviderVertexAI,
 	}
 
 	for _, p := range providers {
@@ -279,6 +293,8 @@ func TestProviderType_MaxContextTokens_HasSafetyMargin(t *testing.T) {
 	// Verify limits have safety margin (not exact API limits)
 	// OpenAI: 8191 actual, we use 8000
 	// Voyage: 16000 actual, we use 15000
+	// VertexAI: 3072 actual, we use 3000
 	assert.Less(t, ProviderOpenAI.MaxContextTokens(), 8191)
 	assert.Less(t, ProviderVoyage.MaxContextTokens(), 16000)
+	assert.Less(t, ProviderVertexAI.MaxContextTokens(), 3072)
 }

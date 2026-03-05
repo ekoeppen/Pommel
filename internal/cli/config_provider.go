@@ -63,7 +63,6 @@ func (v *RealAPIValidator) ValidateVoyage(apiKey string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// configProviderState holds the state for the config provider command
 type configProviderState struct {
 	validator APIValidator
 	input     io.Reader
@@ -71,9 +70,11 @@ type configProviderState struct {
 }
 
 var (
-	configProviderAPIKey string
-	configProviderURL    string
-	configProviderModel  string
+	configProviderAPIKey    string
+	configProviderURL       string
+	configProviderModel     string
+	configProviderProjectID string
+	configProviderLocation  string
 )
 
 var configProviderCmd = &cobra.Command{
@@ -89,12 +90,13 @@ Available providers:
   ollama-remote  Remote Ollama instance (requires --url)
   openai         OpenAI API (requires --api-key or OPENAI_API_KEY env)
   voyage         Voyage AI API (requires --api-key or VOYAGE_API_KEY env)
+  vertexai       Google Vertex AI (requires --project-id or GOOGLE_CLOUD_PROJECT env)
 
 Examples:
   pm config provider                          # Interactive setup
   pm config provider ollama                   # Use local Ollama
   pm config provider openai --api-key sk-... # Use OpenAI with key
-  pm config provider ollama-remote --url http://192.168.1.100:11434`,
+  pm config provider vertexai --project-id my-project`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		state := &configProviderState{
 			validator: NewRealAPIValidator(),
@@ -110,6 +112,8 @@ func init() {
 	configProviderCmd.Flags().StringVar(&configProviderAPIKey, "api-key", "", "API key for OpenAI or Voyage")
 	configProviderCmd.Flags().StringVar(&configProviderURL, "url", "", "URL for remote Ollama instance")
 	configProviderCmd.Flags().StringVar(&configProviderModel, "model", "", "Embedding model name")
+	configProviderCmd.Flags().StringVar(&configProviderProjectID, "project-id", "", "Google Cloud Project ID for Vertex AI")
+	configProviderCmd.Flags().StringVar(&configProviderLocation, "location", "", "Google Cloud Location for Vertex AI (default: us-central1)")
 }
 
 // NewConfigProviderCmd creates a new config provider command for testing
@@ -129,6 +133,8 @@ func NewConfigProviderCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configProviderAPIKey, "api-key", "", "API key for OpenAI or Voyage")
 	cmd.Flags().StringVar(&configProviderURL, "url", "", "URL for remote Ollama instance")
 	cmd.Flags().StringVar(&configProviderModel, "model", "", "Embedding model name")
+	cmd.Flags().StringVar(&configProviderProjectID, "project-id", "", "Google Cloud Project ID for Vertex AI")
+	cmd.Flags().StringVar(&configProviderLocation, "location", "", "Google Cloud Location for Vertex AI")
 	return cmd
 }
 
@@ -149,6 +155,8 @@ func NewConfigProviderCmdWithValidator(validator APIValidator) *cobra.Command {
 	cmd.Flags().StringVar(&configProviderAPIKey, "api-key", "", "API key for OpenAI or Voyage")
 	cmd.Flags().StringVar(&configProviderURL, "url", "", "URL for remote Ollama instance")
 	cmd.Flags().StringVar(&configProviderModel, "model", "", "Embedding model name")
+	cmd.Flags().StringVar(&configProviderProjectID, "project-id", "", "Google Cloud Project ID for Vertex AI")
+	cmd.Flags().StringVar(&configProviderLocation, "location", "", "Google Cloud Location for Vertex AI")
 	return cmd
 }
 
@@ -180,10 +188,11 @@ func runConfigProviderDirect(state *configProviderState, providerName, currentPr
 		"ollama-remote": true,
 		"openai":        true,
 		"voyage":        true,
+		"vertexai":      true,
 	}
 
 	if !validProviders[providerName] {
-		return fmt.Errorf("unknown provider '%s'; valid providers are: ollama, ollama-remote, openai, voyage", providerName)
+		return fmt.Errorf("unknown provider '%s'; valid providers are: ollama, ollama-remote, openai, voyage, vertexai", providerName)
 	}
 
 	// Build config
@@ -228,6 +237,19 @@ func runConfigProviderDirect(state *configProviderState, providerName, currentPr
 		if configProviderAPIKey != "" {
 			cfg.Embedding.Voyage.APIKey = configProviderAPIKey
 		}
+
+	case "vertexai":
+		projectID := configProviderProjectID
+		if projectID == "" {
+			projectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
+		}
+		if projectID == "" {
+			return fmt.Errorf("Project ID required for Vertex AI provider. Use --project-id or set GOOGLE_CLOUD_PROJECT environment variable")
+		}
+		cfg.Embedding.VertexAI.ProjectID = projectID
+		if configProviderLocation != "" {
+			cfg.Embedding.VertexAI.Location = configProviderLocation
+		}
 	}
 
 	// Set model if provided
@@ -239,6 +261,8 @@ func runConfigProviderDirect(state *configProviderState, providerName, currentPr
 			cfg.Embedding.OpenAI.Model = configProviderModel
 		case "voyage":
 			cfg.Embedding.Voyage.Model = configProviderModel
+		case "vertexai":
+			cfg.Embedding.VertexAI.Model = configProviderModel
 		}
 	}
 
@@ -271,8 +295,9 @@ func runConfigProviderInteractive(state *configProviderState, currentProvider st
 	fmt.Fprintln(state.output, "  2. Remote Ollama (self-hosted server)")
 	fmt.Fprintln(state.output, "  3. OpenAI (best quality, requires API key)")
 	fmt.Fprintln(state.output, "  4. Voyage AI (optimized for code, requires API key)")
+	fmt.Fprintln(state.output, "  5. Google Vertex AI (requires Project ID)")
 	fmt.Fprintln(state.output)
-	fmt.Fprint(state.output, "Enter choice (1-4): ")
+	fmt.Fprint(state.output, "Enter choice (1-5): ")
 
 	choice, err := reader.ReadString('\n')
 	if err != nil {
@@ -281,17 +306,17 @@ func runConfigProviderInteractive(state *configProviderState, currentProvider st
 	choice = strings.TrimSpace(choice)
 
 	choiceNum, err := strconv.Atoi(choice)
-	if err != nil || choiceNum < 1 || choiceNum > 4 {
-		fmt.Fprintln(state.output, "Invalid choice. Please enter 1-4.")
+	if err != nil || choiceNum < 1 || choiceNum > 5 {
+		fmt.Fprintln(state.output, "Invalid choice. Please enter 1-5.")
 		// Read next line for retry
-		fmt.Fprint(state.output, "Enter choice (1-4): ")
+		fmt.Fprint(state.output, "Enter choice (1-5): ")
 		choice, err = reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read input: %w", err)
 		}
 		choice = strings.TrimSpace(choice)
 		choiceNum, err = strconv.Atoi(choice)
-		if err != nil || choiceNum < 1 || choiceNum > 4 {
+		if err != nil || choiceNum < 1 || choiceNum > 5 {
 			return fmt.Errorf("invalid choice")
 		}
 	}
@@ -366,6 +391,31 @@ func runConfigProviderInteractive(state *configProviderState, currentProvider st
 			} else {
 				fmt.Fprintln(state.output, "Invalid API key. You can configure later via VOYAGE_API_KEY environment variable.")
 			}
+		}
+
+	case 5:
+		providerName = "vertexai"
+		cfg.Embedding.Provider = providerName
+		fmt.Fprintln(state.output)
+		fmt.Fprint(state.output, "Enter Google Cloud Project ID: ")
+		projectID, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read Project ID: %w", err)
+		}
+		projectID = strings.TrimSpace(projectID)
+		if projectID == "" {
+			return fmt.Errorf("Project ID is required for Vertex AI")
+		}
+		cfg.Embedding.VertexAI.ProjectID = projectID
+
+		fmt.Fprint(state.output, "Enter Location (default: us-central1): ")
+		location, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read location: %w", err)
+		}
+		location = strings.TrimSpace(location)
+		if location != "" {
+			cfg.Embedding.VertexAI.Location = location
 		}
 	}
 

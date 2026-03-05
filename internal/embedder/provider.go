@@ -17,12 +17,14 @@ const (
 	ProviderOpenAI ProviderType = "openai"
 	// ProviderVoyage uses Voyage AI's embedding API
 	ProviderVoyage ProviderType = "voyage"
+	// ProviderVertexAI uses Google Cloud Vertex AI embedding API
+	ProviderVertexAI ProviderType = "vertexai"
 )
 
 // IsValid returns true if the provider type is recognized
 func (p ProviderType) IsValid() bool {
 	switch p {
-	case ProviderOllama, ProviderOllamaRemote, ProviderOpenAI, ProviderVoyage:
+	case ProviderOllama, ProviderOllamaRemote, ProviderOpenAI, ProviderVoyage, ProviderVertexAI:
 		return true
 	default:
 		return false
@@ -40,6 +42,8 @@ func (p ProviderType) DisplayName() string {
 		return "OpenAI"
 	case ProviderVoyage:
 		return "Voyage AI"
+	case ProviderVertexAI:
+		return "Google Vertex AI"
 	default:
 		return "Unknown"
 	}
@@ -64,6 +68,8 @@ func (p ProviderType) DefaultDimensions() int {
 		return 1536 // text-embedding-3-small
 	case ProviderVoyage:
 		return 1024 // voyage-code-3
+	case ProviderVertexAI:
+		return 768 // text-embedding-004 default
 	default:
 		return 768
 	}
@@ -77,6 +83,8 @@ func (p ProviderType) MaxContextTokens() int {
 		return 8000 // text-embedding-3-small: 8191 minus safety margin
 	case ProviderVoyage:
 		return 15000 // voyage-code-3: 16000 minus safety margin
+	case ProviderVertexAI:
+		return 3000 // text-embedding-005: 3072 minus safety margin
 	default: // ProviderOllama, ProviderOllamaRemote, unknown
 		return 8000 // Jina v2: 8192 minus safety margin
 	}
@@ -89,6 +97,7 @@ func AllProviders() []ProviderType {
 		ProviderOllamaRemote,
 		ProviderOpenAI,
 		ProviderVoyage,
+		ProviderVertexAI,
 	}
 }
 
@@ -107,6 +116,7 @@ type ProviderConfig struct {
 	Ollama   OllamaProviderSettings
 	OpenAI   OpenAIProviderSettings
 	Voyage   VoyageProviderSettings
+	VertexAI VertexAIProviderSettings
 }
 
 // OllamaProviderSettings holds Ollama-specific settings
@@ -125,6 +135,13 @@ type OpenAIProviderSettings struct {
 type VoyageProviderSettings struct {
 	APIKey string
 	Model  string
+}
+
+// VertexAIProviderSettings holds Google Vertex AI-specific settings
+type VertexAIProviderSettings struct {
+	ProjectID string
+	Location  string
+	Model     string
 }
 
 // NewFromConfig creates an Embedder based on the provider configuration
@@ -169,6 +186,21 @@ func NewFromConfig(cfg *ProviderConfig) (Embedder, error) {
 			Model:   cfg.Voyage.Model,
 			Timeout: cfg.Timeout,
 		}), nil
+
+	case ProviderVertexAI:
+		if cfg.VertexAI.ProjectID == "" {
+			return nil, &EmbeddingError{
+				Code:       "PROJECT_ID_REQUIRED",
+				Message:    "Vertex AI project ID is required",
+				Suggestion: "Run 'pm config provider' to configure your project ID",
+			}
+		}
+		return NewVertexAIClient(VertexAIConfig{
+			ProjectID: cfg.VertexAI.ProjectID,
+			Location:  cfg.VertexAI.Location,
+			Model:     cfg.VertexAI.Model,
+			Timeout:   cfg.Timeout,
+		})
 
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", cfg.Provider)

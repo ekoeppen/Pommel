@@ -183,6 +183,7 @@ var validProviders = map[string]bool{
 	"ollama-remote": true,
 	"openai":        true,
 	"voyage":        true,
+	"vertexai":      true,
 }
 
 // ValidateProvider validates provider-specific configuration.
@@ -199,7 +200,7 @@ func ValidateProvider(cfg *EmbeddingConfig) ValidationErrors {
 	if !validProviders[cfg.Provider] {
 		errors = append(errors, ValidationError{
 			Field:   "embedding.provider",
-			Message: fmt.Sprintf("unknown provider '%s'; valid values are: ollama, ollama-remote, openai, voyage", cfg.Provider),
+			Message: fmt.Sprintf("unknown provider '%s'; valid values are: ollama, ollama-remote, openai, voyage, vertexai", cfg.Provider),
 		})
 		return errors
 	}
@@ -232,6 +233,15 @@ func ValidateProvider(cfg *EmbeddingConfig) ValidationErrors {
 			errors = append(errors, ValidationError{
 				Field:   "embedding.voyage.api_key",
 				Message: "Voyage API key is required; set in config or VOYAGE_API_KEY environment variable",
+			})
+		}
+
+	case "vertexai":
+		// Vertex AI requires a project ID
+		if cfg.GetVertexAIProjectID() == "" {
+			errors = append(errors, ValidationError{
+				Field:   "embedding.vertexai.project_id",
+				Message: "Vertex AI project ID is required; set in config or GOOGLE_CLOUD_PROJECT environment variable",
 			})
 		}
 	}

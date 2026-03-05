@@ -42,9 +42,10 @@ type EmbeddingConfig struct {
 	CacheSize int    `yaml:"cache_size" json:"cache_size" mapstructure:"cache_size"`
 
 	// Provider-specific configurations
-	Ollama OllamaProviderConfig `yaml:"ollama" json:"ollama" mapstructure:"ollama"`
-	OpenAI OpenAIProviderConfig `yaml:"openai" json:"openai" mapstructure:"openai"`
-	Voyage VoyageProviderConfig `yaml:"voyage" json:"voyage" mapstructure:"voyage"`
+	Ollama   OllamaProviderConfig   `yaml:"ollama" json:"ollama" mapstructure:"ollama"`
+	OpenAI   OpenAIProviderConfig   `yaml:"openai" json:"openai" mapstructure:"openai"`
+	Voyage   VoyageProviderConfig   `yaml:"voyage" json:"voyage" mapstructure:"voyage"`
+	VertexAI VertexAIProviderConfig `yaml:"vertexai" json:"vertexai" mapstructure:"vertexai"`
 }
 
 // OllamaProviderConfig contains Ollama-specific settings
@@ -63,6 +64,13 @@ type OpenAIProviderConfig struct {
 type VoyageProviderConfig struct {
 	APIKey string `yaml:"api_key" json:"api_key" mapstructure:"api_key"`
 	Model  string `yaml:"model" json:"model" mapstructure:"model"`
+}
+
+// VertexAIProviderConfig contains Google Vertex AI-specific settings
+type VertexAIProviderConfig struct {
+	ProjectID string `yaml:"project_id" json:"project_id" mapstructure:"project_id"`
+	Location  string `yaml:"location" json:"location" mapstructure:"location"`
+	Model     string `yaml:"model" json:"model" mapstructure:"model"`
 }
 
 // GetOllamaURL returns the Ollama URL from config or environment variable.
@@ -99,6 +107,36 @@ func (e *EmbeddingConfig) GetVoyageAPIKey() string {
 	return os.Getenv("VOYAGE_API_KEY")
 }
 
+// GetVertexAIProjectID returns the Vertex AI project ID from config or environment variable.
+func (e *EmbeddingConfig) GetVertexAIProjectID() string {
+	if e.VertexAI.ProjectID != "" {
+		return e.VertexAI.ProjectID
+	}
+	return os.Getenv("GOOGLE_CLOUD_PROJECT")
+}
+
+// GetVertexAILocation returns the Vertex AI location from config or environment variable.
+func (e *EmbeddingConfig) GetVertexAILocation() string {
+	if e.VertexAI.Location != "" {
+		return e.VertexAI.Location
+	}
+	if loc := os.Getenv("GOOGLE_CLOUD_LOCATION"); loc != "" {
+		return loc
+	}
+	return "us-central1" // Default location
+}
+
+// GetVertexAILocation returns the Vertex AI location from config or environment variable.
+func (e *EmbeddingConfig) GetVertexAIModel() string {
+	if e.VertexAI.Model != "" {
+		return e.VertexAI.Model
+	}
+	if loc := os.Getenv("GOOGLE_CLOUD_MODEL"); loc != "" {
+		return loc
+	}
+	return "text-embedding-005" // Default model
+}
+
 // DefaultDimensions returns the default embedding dimensions for the configured provider.
 func (e *EmbeddingConfig) DefaultDimensions() int {
 	switch e.Provider {
@@ -106,6 +144,8 @@ func (e *EmbeddingConfig) DefaultDimensions() int {
 		return 1536 // text-embedding-3-small
 	case "voyage":
 		return 1024 // voyage-code-3
+	case "vertexai":
+		return 768 // text-embedding-005
 	default:
 		return 768 // Jina Code embeddings via Ollama
 	}

@@ -42,10 +42,14 @@ func CheckProviderConfigured(cfg *config.Config) error {
 		if url == "" || url == "http://localhost:11434" {
 			return fmt.Errorf("ollama-remote provider requires URL: set embedding.ollama.url in config")
 		}
+	case "vertexai":
+		if cfg.Embedding.GetVertexAIProjectID() == "" {
+			return fmt.Errorf("vertexai provider requires Project ID: set embedding.vertexai.project_id in config or GOOGLE_CLOUD_PROJECT environment variable")
+		}
 	case "ollama":
 		// Local ollama can use defaults, no required fields
 	default:
-		return fmt.Errorf("unknown provider '%s'; valid providers are: ollama, ollama-remote, openai, voyage", cfg.Embedding.Provider)
+		return fmt.Errorf("unknown provider '%s'; valid providers are: ollama, ollama-remote, openai, voyage, vertexai", cfg.Embedding.Provider)
 	}
 
 	return nil
