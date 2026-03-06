@@ -37,30 +37,25 @@ func (r *HeuristicReranker) Rerank(ctx context.Context, query string, candidates
 	for i, c := range candidates {
 		signals := make(map[string]float64)
 
-		// Apply all signals
-		nameScore := NameMatchSignal(c.Name, queryTerms)
-		signals["name_match"] = nameScore
-
-		phraseScore := ExactPhraseSignal(c.Content, query)
-		signals["exact_phrase"] = phraseScore
-
+		// Apply simplified signals for generic chunking strategy
+		
+		// Path match covers both file name and directory structure
 		pathScore := PathMatchSignal(c.FilePath, queryTerms)
 		signals["path_match"] = pathScore
 
-		testPenalty := TestFilePenalty(c.FilePath)
-		signals["test_penalty"] = testPenalty
+		// Exact phrase is high value for finding specific snippets
+		phraseScore := ExactPhraseSignal(c.Content, query)
+		signals["exact_phrase"] = phraseScore
 
+		// Recency helps prioritize active development
 		recencyScore := RecencyBoost(c.ModTime, now)
 		signals["recency"] = recencyScore
 
-		typeScore := ChunkTypeSignal(c.ChunkType, query)
-		signals["chunk_type"] = typeScore
-
 		// Calculate total signal contribution
-		rerankerScore := nameScore + phraseScore + pathScore + testPenalty + recencyScore + typeScore
+		rerankerScore := pathScore + phraseScore + recencyScore
 
 		// Combine with base score
-		// Base score is weighted higher (0.7), reranker signals add adjustment
+		// Base score (from vector/keyword search) is weighted higher (0.7), reranker signals add 30% adjustment
 		finalScore := c.BaseScore*0.7 + c.BaseScore*0.3*(1+rerankerScore)
 
 		results[i] = RankedCandidate{

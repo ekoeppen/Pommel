@@ -7,7 +7,6 @@ require (
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/go-chi/chi/v5 v5.0.11
 	github.com/mattn/go-sqlite3 v1.14.32
-	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.18.0
 	github.com/stretchr/testify v1.9.0

@@ -3,293 +3,153 @@ package chunker
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 
-	"github.com/pommel-dev/pommel/internal/config"
+	"github.com/pommel-dev/pommel/internal/embedder"
 	"github.com/pommel-dev/pommel/internal/models"
 )
 
-// Chunker interface that all chunkers implement
-type Chunker = models.Chunker
+const (
+	// DefaultMaxTokens is the target token count for sliding window chunks.
+	DefaultMaxTokens = 512
+	// DefaultOverlapTokens is the number of tokens to overlap between chunks.
+	DefaultOverlapTokens = 128
+	// MinLinesPerChunk ensures chunks have some minimum content.
+	MinLinesPerChunk = 5
+)
 
-// DefaultMaxTokens is the default token limit for chunk splitting
-const DefaultMaxTokens = 8000
+// ChunkerRegistry handles the chunking of source files using a sliding window strategy.
+type ChunkerRegistry struct{}
 
-// ChunkerRegistry routes files to appropriate chunkers based on language
-type ChunkerRegistry struct {
-	parser          *Parser
-	chunkers        map[Language]Chunker
-	extensionToLang map[string]Language // maps file extensions to languages for O(1) lookup
-	fallback        Chunker
-	splitter        *Splitter
-}
-
-// NewChunkerRegistry creates a new ChunkerRegistry with all supported language chunkers.
-// This uses the config-driven approach, loading chunkers from YAML configuration files
-// in the languages/ directory.
+// NewChunkerRegistry creates a new ChunkerRegistry.
 func NewChunkerRegistry() (*ChunkerRegistry, error) {
-	// Get languages directory relative to this file
-	languagesDir := getEmbeddedLanguagesDir()
-
-	// Use config-driven registry
-	return NewRegistryFromConfig(languagesDir)
+	return &ChunkerRegistry{}, nil
 }
 
-// getEmbeddedLanguagesDir returns the path to the languages/ directory.
-// It checks locations in this order:
-//  1. Platform-specific installed location (via config.LanguagesDir)
-//  2. Source-relative path (for development)
-//  3. Current directory fallback
-func getEmbeddedLanguagesDir() string {
-	// First, try the installed location (e.g., ~/.local/share/pommel/languages)
-	if installedDir, err := config.LanguagesDir(); err == nil {
-		if _, err := os.Stat(installedDir); err == nil {
-			return installedDir
-		}
-	}
-
-	// Fall back to source-relative path (for development)
-	_, filename, _, ok := runtime.Caller(0)
-	if ok {
-		sourceDir := filepath.Join(filepath.Dir(filename), "..", "..", "languages")
-		if _, err := os.Stat(sourceDir); err == nil {
-			return sourceDir
-		}
-	}
-
-	// Last resort fallback
-	return "languages"
-}
-
-// NewRegistryFromConfig creates a registry by loading language configs from a directory.
-// This is the config-driven constructor that uses GenericChunker for all languages
-// defined in YAML configuration files. It enables declarative language support.
-func NewRegistryFromConfig(configDir string) (*ChunkerRegistry, error) {
-	parser, err := NewParser()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create parser: %w", err)
-	}
-
-	reg := &ChunkerRegistry{
-		parser:          parser,
-		chunkers:        make(map[Language]Chunker),
-		extensionToLang: make(map[string]Language),
-		fallback:        NewFallbackChunker(),
-		splitter:        NewSplitter(DefaultMaxTokens),
-	}
-
-	if err := reg.loadConfigs(configDir); err != nil {
-		return nil, err
-	}
-
-	return reg, nil
-}
-
-// loadConfigs loads all language configs from a directory and registers chunkers.
-// If some configs fail to load, it logs warnings but continues with successfully loaded ones.
-func (r *ChunkerRegistry) loadConfigs(configDir string) error {
-	configs, errors := LoadAllLanguageConfigs(configDir)
-
-	// Log warnings for any configs that failed to load
-	for _, err := range errors {
-		log.Printf("WARNING: %v", err)
-	}
-
-	// If no configs were loaded successfully, return an error
-	if len(configs) == 0 {
-		if len(errors) > 0 {
-			return fmt.Errorf("failed to load any language configs: %v", errors[0])
-		}
-		return fmt.Errorf("no language configs found in %s", configDir)
-	}
-
-	// Register each successfully loaded config
-	for _, config := range configs {
-		if err := r.registerFromConfig(config); err != nil {
-			log.Printf("WARNING: failed to register language %s: %v", config.Language, err)
-		}
-	}
-
-	return nil
-}
-
-// registerFromConfig creates and registers a GenericChunker from a LanguageConfig.
-// It also builds the extension-to-language mapping for O(1) extension lookup.
-func (r *ChunkerRegistry) registerFromConfig(config *LanguageConfig) error {
-	// Verify the grammar is supported
-	if !IsGrammarSupported(config.TreeSitter.Grammar) {
-		return fmt.Errorf("unsupported grammar: %s", config.TreeSitter.Grammar)
-	}
-
-	// Create GenericChunker for this language
-	chunker, err := NewGenericChunker(r.parser, config)
-	if err != nil {
-		return fmt.Errorf("failed to create chunker for %s: %w", config.Language, err)
-	}
-
-	// Determine the Language key - use the user-friendly language name
-	lang := Language(config.Language)
-
-	// Register the chunker
-	r.chunkers[lang] = chunker
-
-	// Map all extensions to this language
-	for _, ext := range config.Extensions {
-		normalizedExt := strings.ToLower(ext)
-		r.extensionToLang[normalizedExt] = lang
-	}
-
-	return nil
-}
-
-// GetChunkerForExtension returns the chunker for a file extension and whether one was found.
-// The extension should include the leading dot (e.g., ".go", ".py").
-// Extension lookup is case-insensitive.
-func (r *ChunkerRegistry) GetChunkerForExtension(ext string) (Chunker, bool) {
-	normalizedExt := strings.ToLower(ext)
-	lang, ok := r.extensionToLang[normalizedExt]
-	if !ok {
-		return r.fallback, false
-	}
-	chunker, ok := r.chunkers[lang]
-	if !ok {
-		return r.fallback, false
-	}
-	return chunker, true
-}
-
-// GetLanguageForExtension returns the language for a file extension.
-// The extension should include the leading dot (e.g., ".go", ".py").
-// Extension lookup is case-insensitive.
-func (r *ChunkerRegistry) GetLanguageForExtension(ext string) (Language, bool) {
-	normalizedExt := strings.ToLower(ext)
-	lang, ok := r.extensionToLang[normalizedExt]
-	return lang, ok
-}
-
-// Chunk processes a source file and returns its chunks using the appropriate chunker
+// Chunk implements models.Chunker.
 func (r *ChunkerRegistry) Chunk(ctx context.Context, file *models.SourceFile) (*models.ChunkResult, error) {
 	if file == nil {
 		return nil, fmt.Errorf("file is required")
 	}
 
-	// Skip minified files - they produce low-quality chunks
-	if IsMinified(file.Content, file.Path) {
-		return &models.ChunkResult{
-			File:   file,
-			Chunks: []*models.Chunk{},
-		}, nil
+	result := &models.ChunkResult{
+		File:   file,
+		Chunks: make([]*models.Chunk, 0),
+		Errors: make([]error, 0),
 	}
 
-	var result *models.ChunkResult
-	var err error
+	content := string(file.Content)
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+	if totalLines == 0 {
+		totalLines = 1
+	}
 
-	// Try to find chunker by file extension first (config-driven approach)
-	ext := strings.ToLower(filepath.Ext(file.Path))
-	if lang, ok := r.extensionToLang[ext]; ok {
-		if chunker, found := r.chunkers[lang]; found {
-			// Set language to the config's language name for this extension
-			file.Language = string(lang)
-			result, err = chunker.Chunk(ctx, file)
-			if err != nil {
-				return nil, err
+	// 1. Always add a file-level chunk
+	fileChunk := &models.Chunk{
+		FilePath:     file.Path,
+		StartLine:    1,
+		EndLine:      totalLines,
+		Level:        models.ChunkLevelFile,
+		Language:     file.Language,
+		Content:      content,
+		Name:         file.Path,
+		LastModified: file.LastModified,
+	}
+	fileChunk.SetHashes()
+	result.Chunks = append(result.Chunks, fileChunk)
+
+	// 2. For larger files, create overlapping sections
+	tokens := embedder.EstimateTokens(content)
+	if tokens > DefaultMaxTokens {
+		sections := splitIntoSections(file, lines, fileChunk.ID)
+		result.Chunks = append(result.Chunks, sections...)
+	}
+
+	return result, nil
+}
+
+func splitIntoSections(file *models.SourceFile, lines []string, parentID string) []*models.Chunk {
+	var chunks []*models.Chunk
+	currentStart := 0
+
+	// Target characters per chunk based on tokens
+	targetChars := embedder.MaxCharsForTokens(DefaultMaxTokens)
+	overlapChars := embedder.MaxCharsForTokens(DefaultOverlapTokens)
+
+	for currentStart < len(lines) {
+		// Find end line for this chunk based on character/token limit
+		currentChars := 0
+		currentEnd := currentStart
+
+		for i := currentStart; i < len(lines); i++ {
+			lineLen := len(lines[i]) + 1 // +1 for newline
+			if currentChars+lineLen > targetChars && i > currentStart+MinLinesPerChunk {
+				break
 			}
-			return r.processChunks(result, len(file.Content)), nil
+			currentChars += lineLen
+			currentEnd = i + 1
 		}
-	}
 
-	// Fall back to detecting language (legacy approach) for backward compatibility
-	lang := DetectLanguage(file.Path)
-	if chunker, ok := r.chunkers[lang]; ok {
-		file.Language = string(lang)
-		result, err = chunker.Chunk(ctx, file)
-		if err != nil {
-			return nil, err
+		// Extract chunk content
+		chunkLines := lines[currentStart:currentEnd]
+		chunkContent := strings.Join(chunkLines, "\n")
+
+		// Create chunk
+		section := &models.Chunk{
+			FilePath:     file.Path,
+			StartLine:    currentStart + 1,
+			EndLine:      currentEnd,
+			Level:        models.ChunkLevelSection,
+			Language:     file.Language,
+			Content:      chunkContent,
+			Name:         fmt.Sprintf("%s (lines %d-%d)", file.Path, currentStart+1, currentEnd),
+			ParentID:     &parentID,
+			LastModified: file.LastModified,
 		}
-		return r.processChunks(result, len(file.Content)), nil
-	}
+		section.SetHashes()
+		chunks = append(chunks, section)
 
-	// Use fallback for unsupported languages
-	file.Language = string(lang)
-	result, err = r.fallback.Chunk(ctx, file)
-	if err != nil {
-		return nil, err
-	}
-	return r.processChunks(result, len(file.Content)), nil
-}
-
-// SupportedLanguages returns a list of all languages with registered chunkers
-func (r *ChunkerRegistry) SupportedLanguages() []Language {
-	languages := make([]Language, 0, len(r.chunkers))
-	for lang := range r.chunkers {
-		languages = append(languages, lang)
-	}
-	return languages
-}
-
-// IsSupported returns true if there is a registered chunker for the given language
-func (r *ChunkerRegistry) IsSupported(lang Language) bool {
-	_, ok := r.chunkers[lang]
-	return ok
-}
-
-// SetMaxTokens configures the maximum token limit for chunk splitting.
-// This should be called with the embedding provider's context limit.
-func (r *ChunkerRegistry) SetMaxTokens(maxTokens int) {
-	r.splitter = NewSplitter(maxTokens)
-}
-
-// processChunks applies splitting logic to chunks that exceed the token limit.
-// File-level chunks are truncated or skipped for large files.
-// Class-level chunks are truncated.
-// Method-level chunks are split with overlap.
-func (r *ChunkerRegistry) processChunks(result *models.ChunkResult, fileSize int) *models.ChunkResult {
-	if result == nil || len(result.Chunks) == 0 {
-		return result
-	}
-
-	processed := &models.ChunkResult{
-		File:   result.File,
-		Chunks: make([]*models.Chunk, 0, len(result.Chunks)),
-		Errors: result.Errors,
-	}
-
-	for _, chunk := range result.Chunks {
-		switch chunk.Level {
-		case models.ChunkLevelFile:
-			// Handle file-level chunks (may skip or truncate)
-			if sc := r.splitter.HandleFileChunk(chunk, fileSize); sc != nil {
-				newChunk := sc.ToChunk(chunk)
-				newChunk.SetHashes()
-				processed.Chunks = append(processed.Chunks, newChunk)
-			}
-
-		case models.ChunkLevelClass:
-			// Handle class-level chunks (truncate if needed)
-			if sc := r.splitter.HandleClassChunk(chunk); sc != nil {
-				newChunk := sc.ToChunk(chunk)
-				newChunk.SetHashes()
-				processed.Chunks = append(processed.Chunks, newChunk)
-			}
-
-		case models.ChunkLevelMethod, models.ChunkLevelSection:
-			// Split method-level chunks if needed
-			splits := r.splitter.SplitMethod(chunk)
-			for _, sc := range splits {
-				newChunk := sc.ToChunk(chunk)
-				newChunk.SetHashes()
-				processed.Chunks = append(processed.Chunks, newChunk)
-			}
-
-		default:
-			// Pass through any other chunks unchanged
-			processed.Chunks = append(processed.Chunks, chunk)
+		if currentEnd >= len(lines) {
+			break
 		}
+
+		// Calculate overlap for next chunk
+		nextStart := currentEnd
+		backChars := 0
+		for i := currentEnd - 1; i > currentStart; i-- {
+			backChars += len(lines[i]) + 1
+			if backChars >= overlapChars {
+				nextStart = i
+				break
+			}
+		}
+
+		// Ensure we always make progress
+		if nextStart <= currentStart {
+			nextStart = currentEnd
+		}
+
+		currentStart = nextStart
 	}
 
-	return processed
+	return chunks
+}
+
+// GetChunkerForExtension exists for backward compatibility but is no longer needed.
+func (r *ChunkerRegistry) GetChunkerForExtension(ext string) (models.Chunker, bool) {
+	return &LegacyChunkerWrapper{registry: r}, true
+}
+
+// LegacyChunkerWrapper wraps the registry to implement the models.Chunker interface.
+type LegacyChunkerWrapper struct {
+	registry *ChunkerRegistry
+}
+
+func (w *LegacyChunkerWrapper) Chunk(ctx context.Context, file *models.SourceFile) (*models.ChunkResult, error) {
+	return w.registry.Chunk(ctx, file)
+}
+
+func (w *LegacyChunkerWrapper) Language() models.Language {
+	return models.LangUnknown
 }

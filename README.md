@@ -13,11 +13,11 @@ Pommel maintains a vector database of your code, enabling fast semantic search w
 ## Features
 
 - **Hybrid search** - Combines semantic vector search with keyword search (FTS5) using Reciprocal Rank Fusion for best-of-both-worlds results.
-- **Intelligent re-ranking** - Heuristic signals boost results based on name matches, exact phrases, file paths, recency, and code structure.
-- **Smart chunk splitting** - Automatically splits large methods/functions with overlap to stay within embedding context limits. Multiple split matches boost result scores.
+- **Intelligent re-ranking** - Heuristic signals boost results based on file path matches, exact phrases, and recency.
+- **Smart chunk splitting** - Automatically splits large files with overlap to stay within embedding context limits. Multiple split matches boost result scores.
 - **Semantic code search** - Find code by meaning, not just keywords. Search for "rate limiting logic" and find relevant implementations regardless of naming conventions.
 - **Always-fresh file watching** - Automatic file system monitoring keeps your index synchronized with code changes. No manual reindexing required.
-- **Multi-level chunks** - Search at file, class/module, or method/function granularity for precise results.
+- **Reliable context** - Guaranteed to work on any codebase, regardless of language or syntax validity. No more parse errors or unsupported languages.
 - **Minified file detection** - Automatically skips minified JavaScript/CSS files that produce low-quality chunks.
 - **Low latency local embeddings** - All processing happens locally via Ollama with Jina Code Embeddings v2 (768-dim vectors).
 - **Context savings metrics** - See how much context window you're saving compared to grep-based approaches with `--metrics`.
@@ -141,10 +141,6 @@ pm search "authentication middleware"
 # Limit results
 pm search "database connection" --limit 20
 
-# Filter by chunk level
-pm search "error handling" --level method
-pm search "service classes" --level class
-
 # Filter by path
 pm search "api handler" --path src/api/
 
@@ -169,7 +165,6 @@ pm search "utility functions" --no-rerank
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--limit` | `-n` | Maximum number of results (default: 10) |
-| `--level` | `-l` | Chunk level filter: `file`, `class`, `method` |
 | `--path` | `-p` | Path prefix filter |
 | `--json` | `-j` | Output as JSON (agent-friendly) |
 | `--verbose` | `-v` | Show detailed match reasons and score breakdown |
@@ -188,22 +183,16 @@ pm search "utility functions" --no-rerank
       "file": "src/auth/middleware.py",
       "start_line": 15,
       "end_line": 45,
-      "level": "class",
+      "level": "section",
       "language": "python",
-      "name": "AuthMiddleware",
       "score": 0.89,
       "content": "class AuthMiddleware:\n    ...",
       "match_source": "both",
-      "match_reasons": ["semantic similarity", "keyword match via BM25", "contains 'auth' in name"],
+      "match_reasons": ["semantic similarity", "keyword match via BM25", "contains 'auth' in path"],
       "score_details": {
         "vector_score": 0.85,
         "keyword_score": 0.72,
         "rrf_score": 0.89
-      },
-      "parent": {
-        "id": "chunk-parent123",
-        "name": "auth.middleware",
-        "level": "file"
       }
     }
   ],
@@ -264,7 +253,6 @@ pm config                              # Show current configuration
 pm config get embedding.ollama_url     # Get specific setting
 pm config set watcher.debounce_ms 1000 # Update setting
 pm config set daemon.port 7421         # Change daemon port
-pm config set search.default_levels method,class,file  # Set search levels
 ```
 
 ## Configuration
@@ -273,12 +261,6 @@ Configuration is stored in `.pommel/config.yaml`:
 
 ```yaml
 version: 1
-
-# Chunk levels to generate
-chunk_levels:
-  - method
-  - class
-  - file
 
 # File patterns to include
 include_patterns:
@@ -319,9 +301,6 @@ embedding:
 # Search defaults
 search:
   default_limit: 10
-  default_levels:
-    - method
-    - class
 
 # Hybrid search settings (v0.5.0+)
 hybrid_search:
@@ -486,9 +465,6 @@ This project uses Pommel for semantic code search.
 # Find code related to a concept
 pm search "rate limiting logic" --json --limit 5
 
-# Find implementations of a pattern
-pm search "retry with exponential backoff" --level method --json
-
 # Search within a specific area
 pm search "validation" --path "src/Api/" --json
 \`\`\`
@@ -518,45 +494,16 @@ Agent needs to understand authentication...
 
 ## Supported Languages
 
-Pommel supports 33 programming languages with AST-aware chunking via Tree-sitter:
+Pommel is language-agnostic. It uses a robust, token-aware sliding window strategy to index and search any programming language or text format. 
 
-| Language | Extensions | Chunk Levels |
-|----------|------------|--------------|
-| Bash | `.sh`, `.bash`, `.bashrc`, `.zsh`, `.zshrc` | file, function |
-| C | `.c`, `.h` | file, struct, function |
-| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`, `.h++` | file, class/struct, function/method |
-| C# | `.cs` | file, class/struct/interface, method/property |
-| CSS | `.css` | file, rule_set/media/keyframes |
-| CUE | `.cue` | file, struct, field |
-| Dockerfile | `.dockerfile` | file, instruction |
-| Elixir | `.ex`, `.exs` | file, module, function |
-| Elm | `.elm` | file, module/type, function |
-| Go | `.go` | file, struct/interface, function/method |
-| Groovy | `.groovy`, `.gradle` | file, class/interface, method |
-| HCL | `.hcl`, `.tf`, `.tfvars` | file, block, attribute |
-| HTML | `.html`, `.htm` | file, element |
-| Java | `.java` | file, class/interface/enum, method |
-| JavaScript | `.js`, `.mjs`, `.cjs` | file, class, function |
-| JSX | `.jsx` | file, class, function |
-| Kotlin | `.kt`, `.kts` | file, class/object, function |
-| Lua | `.lua` | file, function |
-| Markdown | `.md`, `.markdown`, `.mdx` | file, section/heading |
-| OCaml | `.ml`, `.mli` | file, module/class, function |
-| PHP | `.php`, `.php3`, `.php4`, `.php5`, `.phps`, `.phtml` | file, class/trait, method/function |
-| Protocol Buffers | `.proto` | file, message/enum/service, field/rpc |
-| Python | `.py`, `.pyi`, `.pyw` | file, class, method/function |
-| Ruby | `.rb`, `.rake`, `.gemspec` | file, class/module, method |
-| Rust | `.rs` | file, struct/enum/trait/impl, function |
-| Scala | `.scala`, `.sc` | file, class/object/trait, function |
-| SQL | `.sql` | file, table/view, function/procedure |
-| Svelte | `.svelte` | file, script/style, element |
-| Swift | `.swift` | file, class/struct/protocol, function |
-| TOML | `.toml` | file, table |
-| TSX | `.tsx` | file, class/interface, function |
-| TypeScript | `.ts`, `.mts`, `.cts` | file, class/interface, function |
-| YAML | `.yaml`, `.yml` | file, mapping |
+Every file is indexed at two levels:
+- **File level**: The entire file content.
+- **Section level**: Overlapping 512-token chunks (approx. 50-100 lines) optimized for AI context windows.
 
-Other file types are indexed at file-level only (fallback chunking).
+This ensures:
+- **Zero parse errors**: Works on modern, experimental, or even broken syntax.
+- **Consistent context size**: Search results are always perfectly sized for LLMs.
+- **Universal support**: No need for specific Tree-sitter grammars or language configs.
 
 **macOS Build Note:** Building YAML support requires C++ headers. Set `CGO_CXXFLAGS="-I$(xcrun --show-sdk-path)/usr/include/c++/v1"` if you encounter C++ header errors.
 
@@ -757,7 +704,7 @@ AI Agent / Developer
         v
     Pommel Daemon (pommeld)
     ├── File watcher (debounced)
-    ├── Multi-level chunker (Tree-sitter)
+    ├── Sliding window chunker
     ├── Embedding generator (Ollama)
     └── Search Pipeline:
         ├── Vector search (sqlite-vec)
@@ -786,11 +733,9 @@ Pommel uses a multi-stage search pipeline for optimal result quality:
 
 ### 2. Re-ranking
 Heuristic signals boost results based on:
-- **Name match**: Query terms appearing in function/class names
 - **Exact phrase**: Complete query phrase found in content
 - **Path match**: Query terms in file path
 - **Recency**: Recently modified files get a small boost
-- **Test penalty**: Test files ranked slightly lower (configurable)
 
 ### 3. Result Enrichment
 Each result includes:
