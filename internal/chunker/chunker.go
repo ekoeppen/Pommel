@@ -14,10 +14,7 @@ import (
 )
 
 // Chunker interface that all chunkers implement
-type Chunker interface {
-	Chunk(ctx context.Context, file *models.SourceFile) (*models.ChunkResult, error)
-	Language() Language
-}
+type Chunker = models.Chunker
 
 // DefaultMaxTokens is the default token limit for chunk splitting
 const DefaultMaxTokens = 8000

@@ -1,12 +1,34 @@
 package models
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// Language represents a programming language supported by the parser.
+type Language string
+
+const (
+	LangGo         Language = "go"
+	LangJava       Language = "java"
+	LangCSharp     Language = "csharp"
+	LangPython     Language = "python"
+	LangJavaScript Language = "javascript"
+	LangTypeScript Language = "typescript"
+	LangTSX        Language = "tsx"
+	LangJSX        Language = "jsx"
+	LangUnknown    Language = "unknown"
+)
+
+// Chunker interface that all chunkers implement
+type Chunker interface {
+	Chunk(ctx context.Context, file *SourceFile) (*ChunkResult, error)
+	Language() Language
+}
 
 // ChunkLevel represents the granularity of a code chunk
 type ChunkLevel string

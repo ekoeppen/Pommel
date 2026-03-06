@@ -7,23 +7,24 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/pommel-dev/pommel/internal/models"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/markdown"
 )
 
 // Language represents a programming language supported by the parser.
-type Language string
+type Language = models.Language
 
 const (
-	LangGo         Language = "go"
-	LangJava       Language = "java"
-	LangCSharp     Language = "csharp"
-	LangPython     Language = "python"
-	LangJavaScript Language = "javascript"
-	LangTypeScript Language = "typescript"
-	LangTSX        Language = "tsx"
-	LangJSX        Language = "jsx"
-	LangUnknown    Language = "unknown"
+	LangGo         = models.LangGo
+	LangJava       = models.LangJava
+	LangCSharp     = models.LangCSharp
+	LangPython     = models.LangPython
+	LangJavaScript = models.LangJavaScript
+	LangTypeScript = models.LangTypeScript
+	LangTSX        = models.LangTSX
+	LangJSX        = models.LangJSX
+	LangUnknown    = models.LangUnknown
 )
 
 // Parser wraps tree-sitter functionality for parsing multiple languages.
